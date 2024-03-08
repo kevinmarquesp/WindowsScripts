@@ -2,6 +2,7 @@ from typing import Any, Literal, Optional, Callable
 from argparse import Namespace, ArgumentParser
 from json import loads, load
 from ftplib import FTP
+from time import sleep, time
 from sys import argv
 from concurrent.futures import ThreadPoolExecutor
 import curses, os
@@ -189,6 +190,7 @@ class DefaultArguments:
     username: str
     password: str
     sync_config_file: str
+    timeout: int
 
     def __init__(self):
         os_key: str = "Windows" if os.name == "nt" else "Linux"
@@ -201,6 +203,7 @@ class DefaultArguments:
         with open(DEFAULT_TARGETS_JSON, "r") as f:
             default_targets = load(f)
 
+        self.timeout = 3
         self.target = default_targets[os_key]["Targets"]
         self.host = default_credentials["Host"]
         self.port = default_credentials["Port"]
@@ -228,6 +231,8 @@ def parse_user_arguments(usr_args) -> Namespace:
     parser.add_argument("-s", "--sync-config-file", type=str, default=defaults.sync_config_file, help="Path, in the\
                         FTP server storage, for the JSON config file, this program will use that file to know what\
                         directories/files it should mirror.")
+    parser.add_argument("-T", "--timeout", type=int, default=defaults.timeout, help="Timeout span, in seconds, that\
+                        will be used to throw an error on the FTP connection related code.")
 
     return parser.parse_args()
 
@@ -292,28 +297,40 @@ def is_ftp_dir(ftp_path: str, ftp: FTP) -> bool:
         return False
 
 
-def mirror_ftp_file(ftp_path: str, target: str, host: str, port: int, username: str, password: str) -> None:
+def retry_on_exception(func: Callable):
     r"""
     """
 
-    while True:
-        try:
-            cprint(f"Mirroing [c]{ftp_path}[/] to [c]{target}[/]")
-
-            with ftp_connect(host, port, username, password) as ftp:
-                if not is_ftp_dir(ftp_path, ftp):
-                    with open(target, "wb") as target_file:
-                        ftp.retrbinary(f"RETR {ftp_path}", target_file.write)
-                else:
-                    logger(f"Could not mirror a directory, skiping {ftp_path}", ptype="warning")
-
-            break
-
-        except Exception as e:
-            logger(f"{e}" or "FTP connection returned an error", ptype="error")
-            logger(f"Unexpected error at coping {ftp_path} to {target}, trying again...", ptype="warning")
+    def __wrapper(*args, **key_args):
+        while True:
+            try:
+                return func(*args, **key_args)
+            except Exception as e:
+                cprint(f"[r]Func Call Error[/]: {e} [B]{func}[/]")
+                sleep(.5)
+    
+    return __wrapper
 
 
+@retry_on_exception
+def mirror_ftp_file(ftp_path: str, target: str, host: str, port: int, username: str, password: str,
+                    timeout: int) -> None:
+    r"""
+    """
+
+    cprint(f"Mirroing [c]{ftp_path}[/] to [c]{target}[/]")
+
+    with ftp_connect(host, port, username, password, timeout=timeout) as ftp:
+        if not is_ftp_dir(ftp_path, ftp):
+            with open(target, "wb") as target_file:
+                ftp.retrbinary(f"RETR {ftp_path}", target_file.write)
+        else:
+            logger(f"Could not mirror a directory, skiping {ftp_path}", ptype="warning")
+
+    logger(f"Successfuly mirroed {ftp_path} to {target}!", ptype="pass")
+
+
+@retry_on_exception
 def mirror_ftp_dir_structure(ftp_path: str, target: str, exclude: list[str], ftp: FTP) -> None:
     r"""
     """
@@ -334,35 +351,36 @@ def mirror_ftp_dir_structure(ftp_path: str, target: str, exclude: list[str], ftp
         mirror_ftp_dir_structure(ftp_item_path, target_item_path, exclude, ftp)
 
 
+@retry_on_exception
 def mirror_directory_process(ftp_path: str, target: str, exclude: list[str], executor: ThreadPoolExecutor,
-                             host: str, port: int, username: str, password: str) -> Any:
+                             host: str, port: int, username: str, password: str, timeout: int) -> Any:
     r"""
     """
 
-    with ftp_connect(host, port, username, password) as ftp:
+    with ftp_connect(host, port, username, password, timeout=timeout) as ftp:
         if is_ftp_dir(ftp_path, ftp):
             ftp.cwd(ftp_path)
 
         for file in ftp.nlst():
             ftp_file_path: str = f"{ftp_path}/{file}"
-            target_file_path: str = os.path.join(target, ftp_file_path.lstrip("/"))
+            target_file_path: str = os.path.join(target, file)
             
             if ftp_file_path in exclude:
                 continue
 
             if is_ftp_dir(ftp_file_path, ftp):
                 mirror_directory_process(ftp_file_path, target_file_path, exclude, executor, host, port, username,
-                                         password)
+                                        password, timeout)
                 continue
 
-            executor.submit(mirror_ftp_file, ftp_file_path, target_file_path, host, port, username, password)
+            executor.submit(mirror_ftp_file, ftp_file_path, target_file_path, host, port, username, password, timeout)
 
 
 def main(usr_args: list[str]) -> None:
     args: Namespace = parse_user_arguments(usr_args)
     config: SyncConfig = {}
 
-    with ftp_connect(args.host, args.port, args.username, args.password) as ftp:
+    with ftp_connect(args.host, args.port, args.username, args.password, timeout=args.timeout) as ftp:
         config = get_json_config_content(ftp, args.sync_config_file)
 
     menu: dict[str, str] = {}
@@ -377,16 +395,27 @@ def main(usr_args: list[str]) -> None:
 
     #todo: normalize path, put a / at the begining of each path string, and fix the . ones!
 
-    with ftp_connect(args.host, args.port, args.username, args.password) as ftp:
+    with ftp_connect(args.host, args.port, args.username, args.password, timeout=args.timeout) as ftp:
+        logger("Mirroring the directory structure first...")
+
         for data in profile["Data"]:
             for target in args.targets:
                 mirror_ftp_dir_structure(data["Path"], os.path.join(target, data["Path"].lstrip("/")), exclude, ftp)
 
+    benchmark_start: float = time()
+
     with ThreadPoolExecutor(max_workers=os.cpu_count() // 2) as executor:
+        logger("Mirroring all files in parallel tasks...")
+
         for data in profile["Data"]:
             for target in args.targets:
                 mirror_directory_process(data["Path"], os.path.join(target, data["Path"].lstrip("/")), exclude,
-                                         executor, args.host, args.port, args.username, args.password)
+                                         executor, args.host, args.port, args.username, args.password, args.timeout)
+
+    benchmark: float = time() - benchmark_start
+
+    cprint(f"\n[B]{benchmark} seconds[/]\n\n")
+    input()
 
 
 if __name__ == "__main__":
