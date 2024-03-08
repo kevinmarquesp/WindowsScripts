@@ -169,3 +169,67 @@ def clear() -> None:
     """
 
     os.system("cls" if os.name == "nt" else "clear")
+
+
+DEFAULT_CREDENTIALS_JSON: str = r"C:\Users\kevin\Desktop\data\datasets\fsinfo\android.credential.json"\
+                                if os.name == "nt" else\
+                                r"...todo..."
+DEFAULT_TARGETS_JSON: str = r"C:\Users\kevin\Desktop\data\datasets\fsinfo\android-snapshot.backup.json"\
+                            if os.name == "nt" else\
+                            r"...todo..."
+
+class DefaultArguments:
+    target: list[str]
+    host: str
+    port: int
+    username: str
+    password: str
+
+    def __init__(self):
+        os_key: str = "Windows" if os.name == "nt" else "Linux"
+        default_targets: dict[str, Any]
+        default_credentials: dict[str, str | int]
+
+        with open(DEFAULT_CREDENTIALS_JSON, "r") as f:
+            default_credentials = load(f)
+
+        with open(DEFAULT_TARGETS_JSON, "r") as f:
+            default_targets = load(f)
+
+        self.target = default_targets[os_key]["Targets"]
+        self.host = default_credentials["Host"]
+        self.port = default_credentials["Port"]
+        self.username = default_credentials["Username"]
+        self.password = default_credentials["Password"]
+        
+
+def parse_user_arguments(usr_args) -> Namespace:
+    r"""
+    """
+
+    parser: ArgumentParser = ArgumentParser(description="This script will connect to a FTP server, normaly your phone,\
+                                            and use a backup json data stored in that server to backup the selected\
+                                            directorys/files to a destination on this computer.")
+    defaults: DefaultArguments = DefaultArguments()
+
+    parser.add_argument("-t", "--target", type=str, nargs="+", default=defaults.target, help="This argument can have\
+                        multiple values, each value should be a valid path for a directory on the system.")
+    parser.add_argument("-H", "--host", type=str, default=defaults.host, help="The IP address or domain of you server,\
+                        assuming that the server is running localy on your own network.")
+    parser.add_argument("-p", "--port", type=int, default=defaults.port, help="Port to connect to that host.")
+    parser.add_argument("-u", "--username", type=str, default=defaults.username, help="Username to login.")
+    parser.add_argument("-P", "--password", type=str, default=defaults.password, help="Password to login.")
+
+    return parser.parse_args()
+
+
+def main(usr_args: list[str]) -> None:
+    args: Namespace = parse_user_arguments(usr_args)
+
+    cprint(f"[c]{args}[/]")
+    input()
+
+
+if __name__ == "__main__":
+    clear()
+    main(argv[1:])
