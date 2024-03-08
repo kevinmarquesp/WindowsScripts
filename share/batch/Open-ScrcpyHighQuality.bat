@@ -1,0 +1,1 @@
+scrcpy --video-codec=h265 --max-size=1920 --max-fps=120
