@@ -1,97 +1,171 @@
-from ftplib import FTP, error_perm
-from json import loads
-from typing import Any
-from time import time
-from concurrent.futures import ThreadPoolExecutor
-import os
-
-BACKUP_TARGET: str = r"C:\Users\kevin\Desktop\data\backup\mirror\android"
-SYNCBAK_CONF_JSON_FILE: str = "syncbak.conf.json"
-
-FTP_SERVER_HOST: str = "192.168.100.16"
-FTP_PORT: int = 2121
-FTP_LOGIN_USERNAME: str = "kevin"
-FTP_LOGIN_PASSWORD: str = "kevinmarquesp"
-FTP_TIMEOUT: int = 120
-
-base_ftp: FTP = FTP()
-base_ftp.connect(FTP_SERVER_HOST, port=FTP_PORT, timeout=FTP_TIMEOUT)
-base_ftp.login(FTP_LOGIN_USERNAME, FTP_LOGIN_PASSWORD)
+from typing import Any, Literal, Optional
+from argparse import Namespace, ArgumentParser
+from json import loads, load
+from sys import argv
+import curses, os
 
 
-## make sure that the sever has a config file to make the backup
+def display_options_menu(title: str, options: dict[Any, str], default_option: int = 0,
+                            up_keys: list[int] = [curses.KEY_UP, ord("k")],
+                            down_keys: list[int] = [curses.KEY_DOWN, ord("j")],
+                            select_keys: list[int] = [curses.KEY_ENTER, 10, 13, ord("o")]) -> Any:
+    r"""
+    This function displays an interactive options menu in the terminal. The menu is navigable using specified keys
+    for moving the selection up and down, and for selecting an option.
 
-if SYNCBAK_CONF_JSON_FILE not in base_ftp.nlst():
-    raise "Could not find the config file: " + SYNCBAK_CONF_JSON_FILE
+    :param title:
+        The title displayed at the top of the options menu.
+    :param options:
+        A dictionary where each key-value pair represents an option. The keys are option identifiers and the
+        values are the prompts displayed for each option.
+    :param default_option:
+        The index of the option that is selected by default when the menu is displayed. If not provided, the first
+        option is selected by default.
+    :param up_keys:
+        A list of key codes that, when pressed, move the selection up in the menu. By default, these are the up
+        arrow key and the 'k' key.
+    :param down_keys:
+        A list of key codes that, when pressed, move the selection down in the menu. By default, these are the
+        down arrow key and the 'j' key.
+    :param select_keys:
+        A list of key codes that, when pressed, select the currently highlighted option. By default, these are the
+        enter key and the 'o' key.
+
+    :return:
+        A tuple containing three elements: the index of the selected option, the key of the selected option, and
+        the value of the selected option. This allows the calling code to know which option was selected by the
+        user.
+    """
+
+    TITLE_PADDING_START: int = 1
+    PROMPT_PADDING_START: int = 2
+
+    option_keys: list[Any] = list(options.keys())
+    option_values: list[str] = list(options.values())
+
+    #variables related to formating the style of the menu, size of each option, paddings, etc.
+
+    max_prompt_length: int = max(list(map(len, option_values)))
+    title_lines: list[str] = title.split("\n")
+    title_padding_top: int = len(title_lines) - 1
+    menu_list_padding_top: int = title_padding_top + len(title_lines) + 1
+
+    #variables that the wrapper function will use to know witch option is selected
+
+    selected_index: int = default_option
+    selected_key: Any = option_keys[selected_index]
+    selected_value: str = option_values[selected_index]
+
+    user_input: int = 0
+
+    def __display_options_menu_wrapper(stdscr: "curses._CursesWindow"):
+        r"""
+        This function displays an options menu in a curses window. It allows the user to navigate through the
+        options using the up and down keys.
+
+        :param stdscr:
+            The curses window in which the options menu will be displayed.
+        :type stdscr:
+            curses._CursesWindow
+        """
+
+        nonlocal title_lines, option_keys, option_values, selected_key, selected_index, selected_value, user_input
+
+        stdscr.refresh()
+
+        while user_input not in select_keys:  #only stops the event listener when the enter key is pressed
+            stdscr.clear()
+
+            for key, title_line in enumerate(title_lines):  #logic to write the title lines
+                stdscr.addstr(title_padding_top + key, TITLE_PADDING_START + PROMPT_PADDING_START, title_line)
+
+            for key, option_value in enumerate(option_values):  #logic to write the menu options formated in a beaty way
+                option_length: int = len(option_value)
+                option_length_difference: int = max_prompt_length - option_length
+                option_prompt: str = f"  {option_value.strip()}  " + " " * option_length_difference
+
+                stdscr.addstr(key + menu_list_padding_top, PROMPT_PADDING_START, option_prompt,
+                                curses.A_REVERSE if key == selected_index else 0)
+
+                if key == len(option_values) - 1:
+                    stdscr.addstr(key + menu_list_padding_top + 2, 0, "")
+
+            #user event listeners section
+
+            stdscr.refresh()
+            user_input = stdscr.getch()
+
+            if user_input in up_keys:
+                selected_index = (selected_index - 1) % len(option_keys)
+            elif user_input in down_keys:
+                selected_index = (selected_index + 1) % len(option_keys)
+
+            selected_key = option_keys[selected_index]
+            selected_value = option_values[selected_index]
+
+    curses.wrapper(__display_options_menu_wrapper)
+    return (selected_index, selected_key, selected_value)
 
 
-## fetch the json data and convert it to a python dictionary
+def cprint(message: str) -> None:
+    r"""
+    Prints a colored message to the console based on color tags within the message.
 
-syncbak_config_json_lines: list[str] = []
+    :param message: The message to print with color tags.
+    """
 
-base_ftp.retrbinary(f"RETR {SYNCBAK_CONF_JSON_FILE}", lambda data: syncbak_config_json_lines.append(data))
+    clr_tags: list[tuple[str, str]] = [
+        ("[B]", "\033[;;30m"), ("[^B]", "\033[;;40m"),
+        ("[r]", "\033[;;31m"), ("[^r]", "\033[;;41m"),
+        ("[g]", "\033[;;32m"), ("[^g]", "\033[;;42m"),
+        ("[y]", "\033[;;33m"), ("[^y]", "\033[;;43m"),
+        ("[b]", "\033[;;34m"), ("[^b]", "\033[;;44m"),
+        ("[m]", "\033[;;35m"), ("[^m]", "\033[;;45m"),
+        ("[c]", "\033[;;36m"), ("[^c]", "\033[;;46m"),
+        ("[w]", "\033[;;37m"), ("[^w]", "\033[;;47m"),
+        ("[/]", "\033[m"),
+    ]
 
-syncbak_config_json_data: str = "".join([ data.decode() for data in syncbak_config_json_lines ])
-syncbak_config: dict[str: Any] = loads(syncbak_config_json_data)
+    for clr_tag, clr_code in clr_tags:
+        message = message.replace(clr_tag, clr_code)
 
-security_mirror_data_list: list[dict[Any]] = syncbak_config["BackupProfiles"]["SecurityMirror"]["Data"]
-security_mirror_exclude_list: list[str] = [ data["Path"]
-                                            for data in syncbak_config["BackupProfiles"]["SecurityMirror"]["Exclude"] ]
-
-base_ftp.close()
-
-## mirror each file/directory to the target backup dir
-
-def mirror_directory(ftp_path, local_path):
-    ftp: FTP = FTP()
-
-    ftp.connect(FTP_SERVER_HOST, port=FTP_PORT, timeout=FTP_TIMEOUT)
-    ftp.login(FTP_LOGIN_USERNAME, FTP_LOGIN_PASSWORD)
-    ftp.cwd(ftp_path)
-
-    if not os.path.exists(local_path):
-        os.makedirs(local_path)
-
-    items = ftp.nlst()
-
-    for item in items:
-        try:
-            ftp.cwd(item)
-            is_dir = True
-            ftp.cwd("..")
-        except:
-            is_dir = False
-
-        ftp_item_path = f"{ftp_path}/{item}"
-        local_item_path = os.path.join(local_path, item)
-
-        if ftp_item_path in security_mirror_exclude_list:
-            continue
-
-        if is_dir:
-            mirror_directory(ftp_item_path, local_item_path)
-        else:
-            print(f"{ftp_item_path}  ==>  {local_item_path}")
-
-            with open(local_item_path, 'wb') as f:
-                ftp.retrbinary('RETR ' + ftp_item_path, f.write)
-
-    ftp.cwd("..")
-    ftp.close()
+    print(message)
 
 
-benchmark_start: float = time()
+logger_msg_type = Literal["warning", "info", "todo", "error", "fail", "good", "pass"]
+logger_pad_type = Literal["top", "bottom", "both"]
+
+def logger(message: str, ptype: logger_msg_type = "info", padding: Optional[logger_pad_type] = None) -> None:
+    r"""
+    Logs a message with a specified type and optional padding.
+
+    :param message:
+        The message to log.
+    :param ptype:
+        The type of the log message. Defaults to "info".
+    :param padding:
+        The type of padding to apply. Can be "top", "bottom", or "both". Defaults to None.
+    """
+
+    prefix: dict[logger_msg_type, str] = {
+        "warning": "\033[43m WARN \033[;;33m",
+        "info":    "\033[46m INFO \033[;;36m",
+        "todo":    "\033[44m TODO \033[;;34m",
+        "error":   "\033[41m ERRO \033[;;31m",
+        "fail":    "\033[41m FAIL \033[;;31m",
+        "good":    "\033[42m GOOD \033[;;32m",
+        "pass":    "\033[42m PASS \033[;;32m"
+    }
+
+    padding_top: str = "\n" if padding in ["top", "both"] else ""
+    padding_bottom: str = "\n" if padding in ["bottom", "both"] else ""
+
+    print(f"{padding_top}{prefix[ptype]} {message}\033[m{padding_bottom}")
 
 
-for mirror_data in security_mirror_data_list:
-    item_path: str = mirror_data["Path"]  #todo: sanatize the path, put a / if there is any and replace ./!
-    target_subdir: str = os.path.basename(item_path)
+def clear() -> None:
+    r"""
+    Clears the stdout screen.
+    """
 
-    mirror_directory(item_path, os.path.join(BACKUP_TARGET, target_subdir))
-
-
-benchmark: float = time() - benchmark_start
-
-print("\n\n")
-print(benchmark)
-input("\n\n")
+    os.system("cls" if os.name == "nt" else "clear")
