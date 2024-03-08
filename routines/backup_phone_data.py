@@ -173,10 +173,12 @@ def clear() -> None:
 
 DEFAULT_CREDENTIALS_JSON: str = r"C:\Users\kevin\Desktop\data\datasets\fsinfo\android.credential.json"\
                                 if os.name == "nt" else\
-                                r"...todo..."
+                                r"/mnt/c/Users/kevin/Desktop/data/datasets/fsinfo/android.credential.json"
+                                #only works for wsl for now...
 DEFAULT_TARGETS_JSON: str = r"C:\Users\kevin\Desktop\data\datasets\fsinfo\android-snapshot.backup.json"\
                             if os.name == "nt" else\
-                            r"...todo..."
+                            r"/mnt/c/Users/kevin/Desktop/data/datasets/fsinfo/android-snapshot.backup.json"
+                            #only works for wsl for now...
 
 class DefaultArguments:
     target: list[str]
