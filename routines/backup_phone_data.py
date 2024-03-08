@@ -184,6 +184,26 @@ DEFAULT_TARGETS_JSON: str = r"C:\Users\kevin\Desktop\data\datasets\fsinfo\androi
                             #only works for wsl for now...
 
 class DefaultArguments:
+    r"""
+    Class for managing default arguments for synchronization. Some of the default values will depends on a local json
+    file stored in the DEFAULT_TARGETS_JSON and DEFAULT_CREDENTIALS_JSON paths!
+
+    :ivar target:
+        List of target directories.
+    :ivar host:
+        FTP server hostname or IP address.
+    :ivar port:
+        Port number for the FTP server.
+    :ivar username:
+        Username for FTP login.
+    :ivar password:
+        Password for FTP login.
+    :ivar sync_config_file:
+        Path to the synchronization configuration file.
+    :ivar timeout:
+        Timeout duration for FTP operations.
+    """
+
     target: list[str]
     host: str
     port: int
@@ -193,6 +213,11 @@ class DefaultArguments:
     timeout: int
 
     def __init__(self):
+        r"""
+        Initializes the DefaultArguments object and sets default values for target, host, port, username, password,
+        sync_config_file, and timeout attributes based on the operating system.
+        """
+
         os_key: str = "Windows" if os.name == "nt" else "Linux"
         default_targets: dict[str, Any]
         default_credentials: dict[str, str | int]
@@ -212,8 +237,15 @@ class DefaultArguments:
         self.sync_config_file = default_targets["SyncConfigFile"]
         
 
-def parse_user_arguments(usr_args) -> Namespace:
+def parse_user_arguments(usr_args: list[str]) -> Namespace:
     r"""
+    Parses user arguments for a script that connects to an FTP server and backs up selected directories/files.
+
+    :param usr_args:
+        User arguments
+
+    :return:
+        Parsed arguments
     """
 
     parser: ArgumentParser = ArgumentParser(description="This script will connect to a FTP server, normaly your phone,\
@@ -237,22 +269,62 @@ def parse_user_arguments(usr_args) -> Namespace:
     return parser.parse_args()
 
 
+def retry_on_exception(func: Callable):
+    r"""
+    A decorator that allows a function to retry when an exception occurs.
+
+    :param func: The function to be retried upon an exception.
+
+    :return: The wrapper function that handles the retry logic.
+
+    This decorator wraps a function such that if the function raises an exception, it will keep retrying indefinitely.
+    After each failed attempt, it waits for 0.5 seconds before trying again. If the function call is successful, it
+    returns the result.
+    """
+
+    def __wrapper(*args, **key_args):
+        while True:
+            try:
+                return func(*args, **key_args)
+            except Exception as e:
+                cprint(f"[r]Func Call Error[/]: {e} [B]{func}[/]")
+                sleep(.5)
+    
+    return __wrapper
+
+
+@retry_on_exception
 def ftp_connect(host: str, port: int, username: str, password: str, timeout: int = 120) -> FTP:
     r"""
+    Connects to an FTP server with the provided host, port, username, and password.
+
+    :param host:
+        The IP address or domain of the server.
+    :param port:
+        Port to connect to the host.
+    :param username:
+        Username to login.
+    :param password:
+        Password to login.
+    :param timeout:
+        Timeout span, in seconds, that will be used to throw an error on the FTP connection related code. Default is 120
+        seconds.
+
+    :return:
+        An FTP object representing the connection to the server.
+
+    This function attempts to connect to an FTP server using the provided host, port, username, and password.  If the
+    connection or login attempt raises an exception, the function will keep retrying indefinitely, waiting for 0.5
+    seconds after each failed attempt. If the connection and login are successful, it logs a success message and returns
+    the FTP object.
     """
 
     ftp: FTP = FTP()
 
-    while True:
-        try:
-            ftp.connect(host, port=port, timeout=timeout)
-            ftp.login(username, password)
+    ftp.connect(host, port=port, timeout=timeout)
+    ftp.login(username, password)
 
-            logger(f"Successfully connect to ftp://{username}@{host}:{port}", ptype="good")
-            break
-
-        except Exception as e:
-            logger(f"Could not connect to ftp://{username}@{host}:{port}! Trying again...", ptype="warning")
+    logger(f"Successfully connect to ftp://{username}@{host}:{port}", ptype="good")
 
     return ftp
 
@@ -262,6 +334,19 @@ SyncConfig = dict[str, BackupProfile]
 
 def get_json_config_content(ftp: FTP, config_path: str) -> SyncConfig:
     r"""
+    Retrieves the content of a JSON configuration file from an FTP server.
+
+    :param ftp:
+        An FTP object representing the connection to the server.
+    :param config_path:
+        The path to the configuration file on the FTP server.
+
+    :return:
+        The content of the JSON configuration file.
+
+    This function changes the current directory on the FTP server to the directory of the configuration file, retrieves
+    the content of the file, and returns it as a dictionary. If the file does not exist, it logs an error message and
+    raises an exception.
     """
 
     dir_path: str = os.path.dirname(config_path) or "/"
@@ -286,6 +371,20 @@ def get_json_config_content(ftp: FTP, config_path: str) -> SyncConfig:
 
 def is_ftp_dir(ftp_path: str, ftp: FTP) -> bool:
     r"""
+    Checks if a given path on an FTP server is a directory.
+
+    :param ftp_path:
+        The path to check on the FTP server.
+    :param ftp:
+        An FTP object representing the connection to the server.
+
+    :return:
+        True if the path is a directory, False otherwise.
+
+    This function attempts to change the current directory on the FTP server to the given path and then back to the
+    parent directory. If this operation is successful, the function returns True, indicating that the path is a
+    directory. If an exception is raised during this operation, the function returns False, indicating that the path is
+    not a directory.
     """
 
     try:
@@ -293,29 +392,33 @@ def is_ftp_dir(ftp_path: str, ftp: FTP) -> bool:
         ftp.cwd("..")
         return True
 
-    except Exception as _:
+    except Exception as _:  #todo: specify the non existing directory error!
         return False
-
-
-def retry_on_exception(func: Callable):
-    r"""
-    """
-
-    def __wrapper(*args, **key_args):
-        while True:
-            try:
-                return func(*args, **key_args)
-            except Exception as e:
-                cprint(f"[r]Func Call Error[/]: {e} [B]{func}[/]")
-                sleep(.5)
-    
-    return __wrapper
 
 
 @retry_on_exception
 def mirror_ftp_file(ftp_path: str, target: str, host: str, port: int, username: str, password: str,
                     timeout: int) -> None:
     r"""
+    Mirrors a file from an FTP server to a local target.
+
+    :param ftp_path:
+        The path of the file on the FTP server.
+    :param target:
+        The local target where the file will be mirrored.
+    :param host:
+        The host of the FTP server.
+    :param port:
+        The port of the FTP server.
+    :param username:
+        The username to connect to the FTP server.
+    :param password:
+        The password to connect to the FTP server.
+    :param timeout:
+        The timeout for the FTP connection.
+
+    If the ftp_path is a directory, it will be skipped and a warning will be logged. If the mirroring is successful, a
+    success message will be logged.
     """
 
     cprint(f"Mirroing [c]{ftp_path}[/] to [c]{target}[/]")
@@ -333,6 +436,19 @@ def mirror_ftp_file(ftp_path: str, target: str, host: str, port: int, username: 
 @retry_on_exception
 def mirror_ftp_dir_structure(ftp_path: str, target: str, exclude: list[str], ftp: FTP) -> None:
     r"""
+    Mirrors the directory structure from an FTP server to a local target.
+
+    :param ftp_path:
+        The path of the directory on the FTP server.
+    :param target:
+        The local target where the directory structure will be mirrored.
+    :param exclude:
+        A list of FTP paths to exclude from the mirroring.
+    :param ftp:
+        The FTP object representing the connection to the FTP server.
+
+    This function recursively mirrors the directory structure. If the ftp_path is in the exclude list or is not a
+    directory, it will be skipped.
     """
 
     if not os.path.exists(target):
@@ -352,9 +468,32 @@ def mirror_ftp_dir_structure(ftp_path: str, target: str, exclude: list[str], ftp
 
 
 @retry_on_exception
-def mirror_directory_process(ftp_path: str, target: str, exclude: list[str], executor: ThreadPoolExecutor,
-                             host: str, port: int, username: str, password: str, timeout: int) -> Any:
+def mirror_ftp_files(ftp_path: str, target: str, exclude: list[str], executor: ThreadPoolExecutor,
+                             host: str, port: int, username: str, password: str, timeout: int) -> None:
     r"""
+    Mirrors the files from an FTP server to a local target.
+
+    :param ftp_path:
+        The path of the directory on the FTP server.
+    :param target:
+        The local target where the files will be mirrored.
+    :param exclude:
+        A list of FTP paths to exclude from the mirroring.
+    :param executor:
+        The ThreadPoolExecutor that will be used for concurrent file mirroring.
+    :param host:
+        The host of the FTP server.
+    :param port:
+        The port of the FTP server.
+    :param username:
+        The username to connect to the FTP server.
+    :param password:
+        The password to connect to the FTP server.
+    :param timeout:
+        The timeout for the FTP connection.
+
+    This function recursively mirrors the files. If the ftp_path is in the exclude list or is a directory, it will be
+    skipped. Files are mirrored concurrently using the provided executor.
     """
 
     with ftp_connect(host, port, username, password, timeout=timeout) as ftp:
@@ -369,7 +508,7 @@ def mirror_directory_process(ftp_path: str, target: str, exclude: list[str], exe
                 continue
 
             if is_ftp_dir(ftp_file_path, ftp):
-                mirror_directory_process(ftp_file_path, target_file_path, exclude, executor, host, port, username,
+                mirror_ftp_files(ftp_file_path, target_file_path, exclude, executor, host, port, username,
                                         password, timeout)
                 continue
 
@@ -393,6 +532,8 @@ def main(usr_args: list[str]) -> None:
     profile: BackupProfile = config[profile_name]
     exclude: list[str] = [item["Path"] for item in profile["Exclude"]]
 
+    clear()
+
     #todo: normalize path, put a / at the begining of each path string, and fix the . ones!
 
     with ftp_connect(args.host, args.port, args.username, args.password, timeout=args.timeout) as ftp:
@@ -409,7 +550,7 @@ def main(usr_args: list[str]) -> None:
 
         for data in profile["Data"]:
             for target in args.targets:
-                mirror_directory_process(data["Path"], os.path.join(target, data["Path"].lstrip("/")), exclude,
+                mirror_ftp_files(data["Path"], os.path.join(target, data["Path"].lstrip("/")), exclude,
                                          executor, args.host, args.port, args.username, args.password, args.timeout)
 
     benchmark: float = time() - benchmark_start
