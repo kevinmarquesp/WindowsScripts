@@ -186,6 +186,7 @@ class DefaultArguments:
     port: int
     username: str
     password: str
+    sync_config_file: str
 
     def __init__(self):
         os_key: str = "Windows" if os.name == "nt" else "Linux"
@@ -203,6 +204,7 @@ class DefaultArguments:
         self.port = default_credentials["Port"]
         self.username = default_credentials["Username"]
         self.password = default_credentials["Password"]
+        self.sync_config_file = default_targets["SyncConfigFile"]
         
 
 def parse_user_arguments(usr_args) -> Namespace:
@@ -221,6 +223,9 @@ def parse_user_arguments(usr_args) -> Namespace:
     parser.add_argument("-p", "--port", type=int, default=defaults.port, help="Port to connect to that host.")
     parser.add_argument("-u", "--username", type=str, default=defaults.username, help="Username to login.")
     parser.add_argument("-P", "--password", type=str, default=defaults.password, help="Password to login.")
+    parser.add_argument("-s", "--sync-config-file", type=str, default=defaults.sync_config_file, help="Path, in the\
+                        FTP server storage, for the JSON config file, this program will use that file to know what\
+                        directories/files it should mirror.")
 
     return parser.parse_args()
 
