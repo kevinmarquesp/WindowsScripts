@@ -230,6 +230,52 @@ def parse_user_arguments(usr_args) -> Namespace:
     return parser.parse_args()
 
 
+def ftp_connect(host: str, port: int, username: str, password: str, timeout: int = 120) -> FTP:
+    r"""
+    """
+
+    ftp: FTP = FTP()
+
+    while True:
+        try:
+            ftp.connect(host, port=port, timeout=timeout)
+            ftp.login(username, password)
+
+            logger(f"Successfully connect to ftp://{username}@{host}:{port}", ptype="good", padding="both")
+            break
+
+        except Exception as e:
+            logger(f"Could not connect to ftp://{username}@{host}:{port}! Trying again...", ptype="warning")
+
+    return ftp
+
+
+SyncConfig = dict[str, dict[Literal["Exclude", "Data"], list[dict[Literal["Path", "Delete?"], str | bool]]]]
+
+def get_json_config_content(ftp: FTP, config_path: str) -> SyncConfig:
+    r"""
+    """
+
+    dir_path: str = os.path.dirname(config_path) or "/"
+    config_file: str = os.path.basename(config_path)
+
+    ftp.cwd(dir_path)
+
+    if config_file not in ftp.nlst():
+        error: str = f"Could not find the {config_path} on the system"
+
+        logger(error, ptype="error", padding="bottom")
+        raise error
+
+    content_lines: list[bytes] = []
+
+    ftp.retrbinary(f"RETR {config_file}", lambda line: content_lines.append(line))
+
+    content: str = "".join([line.decode() for line in content_lines])
+
+    return loads(content)
+
+
 def main(usr_args: list[str]) -> None:
     args: Namespace = parse_user_arguments(usr_args)
 
