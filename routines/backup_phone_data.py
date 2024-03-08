@@ -1,7 +1,9 @@
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Callable
 from argparse import Namespace, ArgumentParser
 from json import loads, load
+from ftplib import FTP
 from sys import argv
+from concurrent.futures import ThreadPoolExecutor
 import curses, os
 
 
@@ -216,7 +218,7 @@ def parse_user_arguments(usr_args) -> Namespace:
                                             directorys/files to a destination on this computer.")
     defaults: DefaultArguments = DefaultArguments()
 
-    parser.add_argument("-t", "--target", type=str, nargs="+", default=defaults.target, help="This argument can have\
+    parser.add_argument("-t", "--targets", type=str, nargs="+", default=defaults.target, help="This argument can have\
                         multiple values, each value should be a valid path for a directory on the system.")
     parser.add_argument("-H", "--host", type=str, default=defaults.host, help="The IP address or domain of you server,\
                         assuming that the server is running localy on your own network.")
@@ -241,7 +243,7 @@ def ftp_connect(host: str, port: int, username: str, password: str, timeout: int
             ftp.connect(host, port=port, timeout=timeout)
             ftp.login(username, password)
 
-            logger(f"Successfully connect to ftp://{username}@{host}:{port}", ptype="good", padding="both")
+            logger(f"Successfully connect to ftp://{username}@{host}:{port}", ptype="good")
             break
 
         except Exception as e:
@@ -250,7 +252,8 @@ def ftp_connect(host: str, port: int, username: str, password: str, timeout: int
     return ftp
 
 
-SyncConfig = dict[str, dict[Literal["Exclude", "Data"], list[dict[Literal["Path", "Delete?"], str | bool]]]]
+BackupProfile = dict[Literal["Exclude", "Data"], list[dict[Literal["Path", "Delete?"], str | bool]]]
+SyncConfig = dict[str, BackupProfile]
 
 def get_json_config_content(ftp: FTP, config_path: str) -> SyncConfig:
     r"""
@@ -276,11 +279,114 @@ def get_json_config_content(ftp: FTP, config_path: str) -> SyncConfig:
     return loads(content)
 
 
+def is_ftp_dir(ftp_path: str, ftp: FTP) -> bool:
+    r"""
+    """
+
+    try:
+        ftp.cwd(ftp_path)
+        ftp.cwd("..")
+        return True
+
+    except Exception as _:
+        return False
+
+
+def mirror_ftp_file(ftp_path: str, target: str, host: str, port: int, username: str, password: str) -> None:
+    r"""
+    """
+
+    while True:
+        try:
+            cprint(f"Mirroing [c]{ftp_path}[/] to [c]{target}[/]")
+
+            with ftp_connect(host, port, username, password) as ftp:
+                if not is_ftp_dir(ftp_path, ftp):
+                    with open(target, "wb") as target_file:
+                        ftp.retrbinary(f"RETR {ftp_path}", target_file.write)
+                else:
+                    logger(f"Could not mirror a directory, skiping {ftp_path}", ptype="warning")
+
+            break
+
+        except Exception as e:
+            logger(f"{e}" or "FTP connection returned an error", ptype="error")
+            logger(f"Unexpected error at coping {ftp_path} to {target}, trying again...", ptype="warning")
+
+
+def mirror_ftp_dir_structure(ftp_path: str, target: str, exclude: list[str], ftp: FTP) -> None:
+    r"""
+    """
+
+    if not os.path.exists(target):
+        os.makedirs(target)
+
+    if is_ftp_dir(ftp_path, ftp):
+        ftp.cwd(ftp_path)
+
+    for item in ftp.nlst():
+        ftp_item_path: str = f"{ftp_path}/{item}"
+        target_item_path: str = os.path.join(target, item)
+        
+        if ftp_item_path in exclude or not is_ftp_dir(ftp_item_path, ftp):
+            continue
+
+        mirror_ftp_dir_structure(ftp_item_path, target_item_path, exclude, ftp)
+
+
+def mirror_directory_process(ftp_path: str, target: str, exclude: list[str], executor: ThreadPoolExecutor,
+                             host: str, port: int, username: str, password: str) -> Any:
+    r"""
+    """
+
+    with ftp_connect(host, port, username, password) as ftp:
+        if is_ftp_dir(ftp_path, ftp):
+            ftp.cwd(ftp_path)
+
+        for file in ftp.nlst():
+            ftp_file_path: str = f"{ftp_path}/{file}"
+            target_file_path: str = os.path.join(target, ftp_file_path.lstrip("/"))
+            
+            if ftp_file_path in exclude:
+                continue
+
+            if is_ftp_dir(ftp_file_path, ftp):
+                mirror_directory_process(ftp_file_path, target_file_path, exclude, executor, host, port, username,
+                                         password)
+                continue
+
+            executor.submit(mirror_ftp_file, ftp_file_path, target_file_path, host, port, username, password)
+
+
 def main(usr_args: list[str]) -> None:
     args: Namespace = parse_user_arguments(usr_args)
+    config: SyncConfig = {}
 
-    cprint(f"[c]{args}[/]")
-    input()
+    with ftp_connect(args.host, args.port, args.username, args.password) as ftp:
+        config = get_json_config_content(ftp, args.sync_config_file)
+
+    menu: dict[str, str] = {}
+
+    for profile_name, profile in config.items():
+        menu[profile_name] = profile["Title"]
+
+    profile_name: str
+    _, profile_name, _ = display_options_menu("ANDROID FTP BACKUP\n- select a backup profile", menu)
+    profile: BackupProfile = config[profile_name]
+    exclude: list[str] = [item["Path"] for item in profile["Exclude"]]
+
+    #todo: normalize path, put a / at the begining of each path string, and fix the . ones!
+
+    with ftp_connect(args.host, args.port, args.username, args.password) as ftp:
+        for data in profile["Data"]:
+            for target in args.targets:
+                mirror_ftp_dir_structure(data["Path"], os.path.join(target, data["Path"].lstrip("/")), exclude, ftp)
+
+    with ThreadPoolExecutor(max_workers=os.cpu_count() // 2) as executor:
+        for data in profile["Data"]:
+            for target in args.targets:
+                mirror_directory_process(data["Path"], os.path.join(target, data["Path"].lstrip("/")), exclude,
+                                         executor, args.host, args.port, args.username, args.password)
 
 
 if __name__ == "__main__":
