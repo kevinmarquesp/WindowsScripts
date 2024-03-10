@@ -520,9 +520,11 @@ def mirror_ftp_files(ftp_path: str, target: str, exclude: list[str], executor: T
 def main(usr_args: list[str]) -> None:
     args: Namespace = parse_user_arguments(usr_args)
     config: SyncConfig = {}
+    ftp_root: str = "/"
 
     with ftp_connect(args.host, args.port, args.username, args.password, timeout=args.timeout) as ftp:
         config = get_json_config_content(ftp, args.sync_config_file)
+        ftp_root = ftp.pwd()
 
     menu: dict[str, str] = {}
 
@@ -535,6 +537,20 @@ def main(usr_args: list[str]) -> None:
     exclude: list[str] = [item["Path"] for item in profile["Exclude"]]
 
     clear()
+
+    for key, path in enumerate([data["Path"] for data in profile["Data"]]):
+        logger("Normalizing the data path strings...")
+
+        norm_path: str = path.replace("./", ftp_root)
+        norm_path = ("/" if norm_path[0] != "/" else "") + norm_path
+        profile["Data"][key]["Path"] = norm_path
+
+    for key, path in enumerate([data["Path"] for data in profile["Exclude"]]):
+        logger("Normalizing the exclude path strings...")
+
+        norm_path: str = path.replace("./", ftp_root)
+        norm_path = ("/" if norm_path[0] != "/" else "") + norm_path
+        profile["Exclude"][key]["Path"] = norm_path
 
     benchmark_start: float = time()
 
