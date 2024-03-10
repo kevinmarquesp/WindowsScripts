@@ -174,6 +174,52 @@ def clear() -> None:
     os.system("cls" if os.name == "nt" else "clear")
 
 
+def retry(expected_err: Exception = Exception, delay_sec: int = 1) -> Callable:
+    r"""
+    A decorator for retrying a function execution upon encountering specified exceptions.
+
+    This decorator wraps a function such that if the function raises an exception of the type `expected_err`, it will
+    retry executing the function after a delay specified by `delay_sec`. If the function raises an exception that is not
+    of the type `expected_err`, it will print an error message and raise that error too.
+
+    :param expected_err:
+        The type of the exceptions upon which the function should be retried. Default is `Exception`, which means the
+        function will be retried for any exception.
+    :param delay_sec:
+        The number of seconds to wait before retrying the function. Default is 1.
+
+    :returns:
+        A callable that takes a function and returns a wrapped version of the function.
+    :raises Exception:
+        If the function raises an exception that is not of the type `expected_err`.
+
+    :Example:
+
+    .. code-block:: python
+
+        @retry(expected_err=ConnectionError, delay_sec=5)
+        def fetch_data():
+            # Function implementation here...
+    """
+
+    def decorator(function: Callable) -> Callable:
+        def wrapper(*args, **key_args) -> Any:
+            while True:
+                try:
+                    return function(*args, **key_args)
+
+                except Exception as err:
+                    if not isinstance(err, expected_err):
+                        cprint(f"[r]Unexpected Error[/]: [B][retry][/] {err} at {function}")
+                        raise err
+
+                    sleep(delay_sec)
+
+        return wrapper
+
+    return decorator
+
+
 DEFAULT_CREDENTIALS_JSON: str = r"C:\Users\kevin\Desktop\data\datasets\fsinfo\android.credential.json"\
                                 if os.name == "nt" else\
                                 r"/mnt/c/Users/kevin/Desktop/data/datasets/fsinfo/android.credential.json"
@@ -269,33 +315,7 @@ def parse_user_arguments(usr_args: list[str]) -> Namespace:
     return parser.parse_args()
 
 
-def retry_on_exception(func: Callable):
-    r"""
-    A decorator that allows a function to retry when an exception occurs.
-
-    :param func:
-        The function to be retried upon an exception.
-
-    :return:
-        The wrapper function that handles the retry logic.
-
-    This decorator wraps a function such that if the function raises an exception, it will keep retrying indefinitely.
-    After each failed attempt, it waits for 0.5 seconds before trying again. If the function call is successful, it
-    returns the result.
-    """
-
-    def __wrapper(*args, **key_args):
-        while True:
-            try:
-                return func(*args, **key_args)
-            except Exception as e:
-                cprint(f"[r]Func Call Error[/]: {e} [B]{func}[/]")
-                sleep(.5)
-    
-    return __wrapper
-
-
-@retry_on_exception
+@retry(delay_sec=0)
 def ftp_connect(host: str, port: int, username: str, password: str, timeout: int = 120) -> FTP:
     r"""
     Connects to an FTP server with the provided host, port, username, and password.
@@ -398,7 +418,7 @@ def is_ftp_dir(ftp_path: str, ftp: FTP) -> bool:
         return False
 
 
-@retry_on_exception
+@retry(delay_sec=0)
 def mirror_ftp_file(ftp_path: str, target: str, host: str, port: int, username: str, password: str,
                     timeout: int) -> None:
     r"""
@@ -435,41 +455,7 @@ def mirror_ftp_file(ftp_path: str, target: str, host: str, port: int, username: 
     logger(f"Successfuly mirroed {ftp_path} to {target}!", ptype="pass")
 
 
-@retry_on_exception
-def mirror_ftp_dir_structure(ftp_path: str, target: str, exclude: list[str], ftp: FTP) -> None:
-    r"""
-    Mirrors the directory structure from an FTP server to a local target.
-
-    :param ftp_path:
-        The path of the directory on the FTP server.
-    :param target:
-        The local target where the directory structure will be mirrored.
-    :param exclude:
-        A list of FTP paths to exclude from the mirroring.
-    :param ftp:
-        The FTP object representing the connection to the FTP server.
-
-    This function recursively mirrors the directory structure. If the ftp_path is in the exclude list or is not a
-    directory, it will be skipped.
-    """
-
-    if not os.path.exists(target):
-        os.makedirs(target)
-
-    if is_ftp_dir(ftp_path, ftp):
-        ftp.cwd(ftp_path)
-
-    for item in ftp.nlst():
-        ftp_item_path: str = f"{ftp_path}/{item}"
-        target_item_path: str = os.path.join(target, item)
-        
-        if ftp_item_path in exclude or not is_ftp_dir(ftp_item_path, ftp):
-            continue
-
-        mirror_ftp_dir_structure(ftp_item_path, target_item_path, exclude, ftp)
-
-
-@retry_on_exception
+@retry(delay_sec=0)
 def mirror_ftp_files(ftp_path: str, target: str, exclude: list[str], executor: ThreadPoolExecutor,
                              host: str, port: int, username: str, password: str, timeout: int) -> None:
     r"""
@@ -562,12 +548,14 @@ def main(usr_args: list[str]) -> None:
 
         for data in profile["Data"]:
             for target in args.targets:
-                mirror_ftp_files(data["Path"], os.path.join(target, data["Path"].lstrip("/")), exclude,
-                                         executor, args.host, args.port, args.username, args.password, args.timeout)
+                full_target: str = os.path.join(target, profile_name, data["Path"].lstrip("/"))
+
+                mirror_ftp_files(data["Path"], full_target, exclude, executor, args.host, args.port, args.username,
+                                 args.password, args.timeout)
 
     benchmark: float = time() - benchmark_start
 
-    cprint(f"\n[B]{benchmark} seconds[/]\n\n")
+    cprint(f"\n[y]{benchmark} seconds[/]\n\n")
     input()
 
 
