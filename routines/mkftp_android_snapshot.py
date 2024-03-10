@@ -12,8 +12,8 @@ MIRROR_ERROR_DELAY: int = 0
 FTP_CONN_ERROR_DELAY: int = .5
 DEFAULT_TIMEOUT: int = 1
 PROCS: int = os.cpu_count() // 2
-DEFAULT_CREDENTIALS_JSON_PATH: str = "Desktop/data/datasets/fsinfo/android.credential.json-"
-DEFAULT_TARGETS_JSON_PATH: str = "Desktop/data/datasets/fsinfo/android-snapshot.backup.json-"
+DEFAULT_CREDENTIALS_JSON_PATH: str = "Desktop/data/datasets/fsinfo/android.credential.json"
+DEFAULT_TARGETS_JSON_PATH: str = "Desktop/data/datasets/fsinfo/android-snapshot.backup.json"
 
 
 def display_options_menu(title: str, options: dict[Any, str], default_option: int = 0,
