@@ -12,6 +12,8 @@ MIRROR_ERROR_DELAY: int = 0
 FTP_CONN_ERROR_DELAY: int = .5
 DEFAULT_TIMEOUT: int = 1
 PROCS: int = os.cpu_count() // 2
+DEFAULT_CREDENTIALS_JSON_PATH: str = "Desktop/data/datasets/fsinfo/android.credential.json-"
+DEFAULT_TARGETS_JSON_PATH: str = "Desktop/data/datasets/fsinfo/android-snapshot.backup.json-"
 
 
 def display_options_menu(title: str, options: dict[Any, str], default_option: int = 0,
@@ -227,12 +229,12 @@ def retry(expected_err: Exception = Exception, delay_sec: int = 1) -> Callable:
     return decorator
 
 
-DEFAULT_CREDENTIALS_JSON: str = os.path.join(os.getenv("userprofile"), r"Desktop\data\datasets\fsinfo\android.credential.json")\
+DEFAULT_CREDENTIALS_JSON: str = os.path.join(os.getenv("userprofile"), DEFAULT_CREDENTIALS_JSON_PATH.replace("/", "\\"))\
                                 if os.name == "nt" else\
-                                os.path.join(os.getenv("HOME"),r"Desktop/data/datasets/fsinfo/android.credential.json")
-DEFAULT_TARGETS_JSON: str = os.path.join(os.getenv("userprofile"), r"Desktop\data\datasets\fsinfo\android-snapshot.backup.json")\
+                                os.path.join(os.getenv("HOME"), DEFAULT_CREDENTIALS_JSON_PATH)
+DEFAULT_TARGETS_JSON: str = os.path.join(os.getenv("userprofile"), DEFAULT_TARGETS_JSON_PATH.replace("/", "\\"))\
                             if os.name == "nt" else\
-                            os.path.join(os.getenv("HOME"), r"Desktop/data/datasets/fsinfo/android-snapshot.backup.json")
+                            os.path.join(os.getenv("HOME"), DEFAULT_TARGETS_JSON_PATH)
 
 class DefaultArguments:
     r"""
@@ -269,6 +271,20 @@ class DefaultArguments:
         sync_config_file, and timeout attributes based on the operating system.
         """
 
+        try:
+            self.__asing_default_from_json()
+
+        except Exception as _:
+            self.timeout = 0
+            self.target = []
+            self.host = ""
+            self.port = 0
+            self.username = ""
+            self.password = ""
+            self.sync_config_file = ""
+
+
+    def __asing_default_from_json(self) -> None:
         os_key: str = "Windows" if os.name == "nt" else "Linux"
         default_targets: dict[str, Any]
         default_credentials: dict[str, str | int]
