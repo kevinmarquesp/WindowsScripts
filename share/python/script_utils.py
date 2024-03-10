@@ -1,4 +1,5 @@
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Callable, Any
+from time import sleep
 import curses, os
 
 
@@ -167,3 +168,48 @@ def clear() -> None:
 
     os.system("cls" if os.name == "nt" else "clear")
 
+
+def retry(expected_err: Exception = Exception, delay_sec: int = 1) -> Callable:
+    r"""
+    A decorator for retrying a function execution upon encountering specified exceptions.
+
+    This decorator wraps a function such that if the function raises an exception of the type `expected_err`, it will
+    retry executing the function after a delay specified by `delay_sec`. If the function raises an exception that is not
+    of the type `expected_err`, it will print an error message and raise that error too.
+
+    :param expected_err:
+        The type of the exceptions upon which the function should be retried. Default is `Exception`, which means the
+        function will be retried for any exception.
+    :param delay_sec:
+        The number of seconds to wait before retrying the function. Default is 1.
+
+    :returns:
+        A callable that takes a function and returns a wrapped version of the function.
+    :raises Exception:
+        If the function raises an exception that is not of the type `expected_err`.
+
+    :Example:
+
+    .. code-block:: python
+
+        @retry(expected_err=ConnectionError, delay_sec=5)
+        def fetch_data():
+            # Function implementation here...
+    """
+
+    def decorator(function: Callable) -> Callable:
+        def wrapper(*args, **key_args) -> Any:
+            while True:
+                try:
+                    return function(*args, **key_args)
+
+                except Exception as err:
+                    if not isinstance(err, expected_err):
+                        cprint(f"[r]Unexpected Error[/]: [B][retry][/] {err} at {function}")
+                        raise err
+
+                    sleep(delay_sec)
+
+        return wrapper
+
+    return decorator
