@@ -8,6 +8,12 @@ from concurrent.futures import ThreadPoolExecutor
 import curses, os
 
 
+MIRROR_ERROR_DELAY: int = 0
+FTP_CONN_ERROR_DELAY: int = .5
+DEFAULT_TIMEOUT: int = 1
+PROCS: int = os.cpu_count() // 2
+
+
 def display_options_menu(title: str, options: dict[Any, str], default_option: int = 0,
                             up_keys: list[int] = [curses.KEY_UP, ord("k")],
                             down_keys: list[int] = [curses.KEY_DOWN, ord("j")],
@@ -274,7 +280,7 @@ class DefaultArguments:
         with open(DEFAULT_TARGETS_JSON, "r") as f:
             default_targets = load(f)
 
-        self.timeout = 3
+        self.timeout = DEFAULT_TIMEOUT
         self.target = default_targets[os_key]["Targets"]
         self.host = default_credentials["Host"]
         self.port = default_credentials["Port"]
@@ -315,7 +321,7 @@ def parse_user_arguments(usr_args: list[str]) -> Namespace:
     return parser.parse_args()
 
 
-@retry(delay_sec=0)
+@retry(delay_sec=FTP_CONN_ERROR_DELAY)
 def ftp_connect(host: str, port: int, username: str, password: str, timeout: int = 120) -> FTP:
     r"""
     Connects to an FTP server with the provided host, port, username, and password.
@@ -418,7 +424,8 @@ def is_ftp_dir(ftp_path: str, ftp: FTP) -> bool:
         return False
 
 
-@retry(delay_sec=0)
+
+@retry(delay_sec=MIRROR_ERROR_DELAY)
 def mirror_ftp_file(ftp_path: str, target: str, host: str, port: int, username: str, password: str,
                     timeout: int) -> None:
     r"""
@@ -455,9 +462,9 @@ def mirror_ftp_file(ftp_path: str, target: str, host: str, port: int, username: 
     logger(f"Successfuly mirroed {ftp_path} to {target}!", ptype="pass")
 
 
-@retry(delay_sec=0)
-def mirror_ftp_files(ftp_path: str, target: str, exclude: list[str], executor: ThreadPoolExecutor,
-                             host: str, port: int, username: str, password: str, timeout: int) -> None:
+@retry(delay_sec=MIRROR_ERROR_DELAY)
+def mirror_ftp_files(ftp_path: str, target: str, exclude: list[str], executor: ThreadPoolExecutor, host: str, port: int,
+                     username: str, password: str, timeout: int) -> None:
     r"""
     Mirrors the files from an FTP server to a local target.
 
