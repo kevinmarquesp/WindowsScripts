@@ -208,6 +208,7 @@ def retry(expected_err: Exception = Exception, delay_sec: int = 1) -> Callable:
                         cprint(f"[r]Unexpected Error[/]: [B][retry][/] {err} at {function}")
                         raise err
 
+                    cprint(f"[r]Error[/]: [B][retry][/] {err} at {function}, trying again...")
                     sleep(delay_sec)
 
         return wrapper

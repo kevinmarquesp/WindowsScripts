@@ -1,7 +1,7 @@
 from typing import Any, Literal, Optional, Callable
 from argparse import Namespace, ArgumentParser
 from json import loads, load
-from ftplib import FTP
+from ftplib import FTP, error_perm
 from time import sleep, time
 from sys import argv
 from concurrent.futures import ThreadPoolExecutor
@@ -219,6 +219,7 @@ def retry(expected_err: Exception = Exception, delay_sec: int = 1) -> Callable:
                         cprint(f"[r]Unexpected Error[/]: [B][retry][/] {err} at {function}")
                         raise err
 
+                    cprint(f"[r]Error[/]: [B][retry][/] {err} at {function}, trying again...")
                     sleep(delay_sec)
 
         return wrapper
@@ -226,14 +227,12 @@ def retry(expected_err: Exception = Exception, delay_sec: int = 1) -> Callable:
     return decorator
 
 
-DEFAULT_CREDENTIALS_JSON: str = r"C:\Users\kevin\Desktop\data\datasets\fsinfo\android.credential.json"\
+DEFAULT_CREDENTIALS_JSON: str = os.path.join(os.getenv("userprofile"), r"Desktop\data\datasets\fsinfo\android.credential.json")\
                                 if os.name == "nt" else\
-                                r"/mnt/c/Users/kevin/Desktop/data/datasets/fsinfo/android.credential.json"
-                                #only works for wsl for now...
-DEFAULT_TARGETS_JSON: str = r"C:\Users\kevin\Desktop\data\datasets\fsinfo\android-snapshot.backup.json"\
+                                os.path.join(os.getenv("HOME"),r"Desktop/data/datasets/fsinfo/android.credential.json")
+DEFAULT_TARGETS_JSON: str = os.path.join(os.getenv("userprofile"), r"Desktop\data\datasets\fsinfo\android-snapshot.backup.json")\
                             if os.name == "nt" else\
-                            r"/mnt/c/Users/kevin/Desktop/data/datasets/fsinfo/android-snapshot.backup.json"
-                            #only works for wsl for now...
+                            os.path.join(os.getenv("HOME"), r"Desktop/data/datasets/fsinfo/android-snapshot.backup.json")
 
 class DefaultArguments:
     r"""
@@ -347,12 +346,14 @@ def ftp_connect(host: str, port: int, username: str, password: str, timeout: int
     the FTP object.
     """
 
+    print("Connecting to the ftp server...")
+
     ftp: FTP = FTP()
 
     ftp.connect(host, port=port, timeout=timeout)
     ftp.login(username, password)
 
-    logger(f"Successfully connect to ftp://{username}@{host}:{port}", ptype="good")
+    cprint(f"[g]Success[/]: Connected to [c]ftp://{username}@{host}:{port}[/]!")
 
     return ftp
 
@@ -376,6 +377,7 @@ def get_json_config_content(ftp: FTP, config_path: str) -> SyncConfig:
     the content of the file, and returns it as a dictionary. If the file does not exist, it logs an error message and
     raises an exception.
     """
+    cprint(f"Fetching [c]{config_path}[/] file...")
 
     dir_path: str = os.path.dirname(config_path) or "/"
     config_file: str = os.path.basename(config_path)
@@ -393,6 +395,8 @@ def get_json_config_content(ftp: FTP, config_path: str) -> SyncConfig:
     ftp.retrbinary(f"RETR {config_file}", lambda line: content_lines.append(line))
 
     content: str = "".join([line.decode() for line in content_lines])
+
+    cprint(f"[g]Success[/]: Fetched config file")
 
     return loads(content)
 
@@ -418,11 +422,11 @@ def is_ftp_dir(ftp_path: str, ftp: FTP) -> bool:
     try:
         ftp.cwd(ftp_path)
         ftp.cwd("..")
-        return True
 
-    except Exception as _:  #todo: specify the non existing directory error!
+    except Exception as _:
         return False
 
+    return True
 
 
 @retry(delay_sec=MIRROR_ERROR_DELAY)
@@ -457,9 +461,9 @@ def mirror_ftp_file(ftp_path: str, target: str, host: str, port: int, username: 
             with open(target, "wb") as target_file:
                 ftp.retrbinary(f"RETR {ftp_path}", target_file.write)
         else:
-            logger(f"Could not mirror a directory, skiping {ftp_path}", ptype="warning")
+            cprint(f"[y]Warning[/]: Cannot mirror a directory, skiping {ftp_path}...")
 
-    logger(f"Successfuly mirroed {ftp_path} to {target}!", ptype="pass")
+    cprint(f"[g]Mirror Successfu[/]: [y]{ftp_path}[/] to [y]{target}[/]")
 
 
 @retry(delay_sec=MIRROR_ERROR_DELAY)
@@ -491,9 +495,11 @@ def mirror_ftp_files(ftp_path: str, target: str, exclude: list[str], executor: T
     skipped. Files are mirrored concurrently using the provided executor.
     """
 
+    cprint(f"[b]Logger[/]: Mirroring [b]{ftp_path}[/]...")
+
     if not os.path.exists(target):
         os.makedirs(target)
-
+    
     with ftp_connect(host, port, username, password, timeout=timeout) as ftp:
         if is_ftp_dir(ftp_path, ftp):
             ftp.cwd(ftp_path)
@@ -507,7 +513,7 @@ def mirror_ftp_files(ftp_path: str, target: str, exclude: list[str], executor: T
 
             if is_ftp_dir(ftp_file_path, ftp):
                 mirror_ftp_files(ftp_file_path, target_file_path, exclude, executor, host, port, username,
-                                        password, timeout)
+                                 password, timeout)
                 continue
 
             executor.submit(mirror_ftp_file, ftp_file_path, target_file_path, host, port, username, password, timeout)
@@ -530,27 +536,35 @@ def main(usr_args: list[str]) -> None:
     profile_name: str
     _, profile_name, _ = display_options_menu("ANDROID FTP BACKUP\n- select a backup profile", menu)
     profile: BackupProfile = config[profile_name]
-    exclude: list[str] = [item["Path"] for item in profile["Exclude"]]
 
     clear()
+    logger("Normalizing the data path strings...", padding="both")
 
     for key, path in enumerate([data["Path"] for data in profile["Data"]]):
-        logger("Normalizing the data path strings...")
-
         norm_path: str = path.replace("./", ftp_root)
         norm_path = ("/" if norm_path[0] != "/" else "") + norm_path
         profile["Data"][key]["Path"] = norm_path
 
-    for key, path in enumerate([data["Path"] for data in profile["Exclude"]]):
-        logger("Normalizing the exclude path strings...")
+        if norm_path != path:
+            cprint(f"Renamed [c]{path}[/] to [c]{norm_path}[/]")
 
+    logger("Normalizing the exclude path strings...", padding="both")
+
+    for key, path in enumerate([data["Path"] for data in profile["Exclude"]]):
         norm_path: str = path.replace("./", ftp_root)
         norm_path = ("/" if norm_path[0] != "/" else "") + norm_path
         profile["Exclude"][key]["Path"] = norm_path
 
+        if norm_path != path:
+            cprint(f"Renamed [c]{path}[/] to [c]{norm_path}[/]")
+
+    exclude: list[str] = [item["Path"] for item in profile["Exclude"]]
+
+    logger("Everything is OK, starting the mirror process...", ptype="good", padding="both")
+
     benchmark_start: float = time()
 
-    with ThreadPoolExecutor(max_workers=os.cpu_count() // 2) as executor:
+    with ThreadPoolExecutor(max_workers=PROCS) as executor:
         logger("Mirroring all files in parallel tasks...")
 
         for data in profile["Data"]:
@@ -562,7 +576,7 @@ def main(usr_args: list[str]) -> None:
 
     benchmark: float = time() - benchmark_start
 
-    cprint(f"\n[y]{benchmark} seconds[/]\n\n")
+    logger(f"Backup finished in {benchmark:.2f} seconds", ptype="pass", padding="both")
     input()
 
 
