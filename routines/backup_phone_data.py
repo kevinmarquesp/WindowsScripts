@@ -536,15 +536,6 @@ def main(usr_args: list[str]) -> None:
 
     clear()
 
-    #todo: normalize path, put a / at the begining of each path string, and fix the . ones!
-
-    with ftp_connect(args.host, args.port, args.username, args.password, timeout=args.timeout) as ftp:
-        logger("Mirroring the directory structure first...")
-
-        for data in profile["Data"]:
-            for target in args.targets:
-                mirror_ftp_dir_structure(data["Path"], os.path.join(target, data["Path"].lstrip("/")), exclude, ftp)
-
     benchmark_start: float = time()
 
     with ThreadPoolExecutor(max_workers=os.cpu_count() // 2) as executor:
