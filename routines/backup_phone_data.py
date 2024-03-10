@@ -498,6 +498,9 @@ def mirror_ftp_files(ftp_path: str, target: str, exclude: list[str], executor: T
     skipped. Files are mirrored concurrently using the provided executor.
     """
 
+    if not os.path.exists(target):
+        os.makedirs(target)
+
     with ftp_connect(host, port, username, password, timeout=timeout) as ftp:
         if is_ftp_dir(ftp_path, ftp):
             ftp.cwd(ftp_path)
